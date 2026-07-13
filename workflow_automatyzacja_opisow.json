@@ -1,0 +1,194 @@
+{
+  "name": "Automated Product Description Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [{ "mode": "everyMinute" }]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "TWOJE_FOLDER_ID_GOOGLE_DRIVE",
+          "mode": "list",
+          "cachedResultName": "Product Photos",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/TWOJE_FOLDER_ID_GOOGLE_DRIVE"
+        },
+        "event": "folderCreated",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "New product folder added",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "TWOJE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "mimeType contains 'image/'",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "={{ $json.id }}",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [224, 0],
+      "id": "9799de27-52db-4f68-a37f-905835bb5558",
+      "name": "Search product images",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "TWOJE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [448, 0],
+      "id": "73bb2cd8-e6af-47bd-8912-4ce0b3f5123e",
+      "name": "Download images",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "TWOJE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all downloaded images into a single item with multiple binary fields\nconst folderName = $('New product folder added').item.json.name;\nconst folderId = $('New product folder added').item.json.id;\n\nconst out = {\n  json: {\n    folderId: folderId,\n    folderName: folderName,\n  },\n  binary: {}\n};\n\nconst items = $input.all();\nitems.forEach((item, idx) => {\n  if (item.binary && item.binary.data) {\n    out.binary[`image${idx + 1}`] = item.binary.data;\n  }\n});\n\nreturn [out];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [672, 0],
+      "id": "a5f39459-f4e8-44a8-9bc8-f7a30f630669",
+      "name": "Aggregate images"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "GPT-4.1"
+        },
+        "text": "=You have several photos of the same product (different angles). Analyze them and generate a structured product description for an e-commerce website.\n\n- Writing style:\nWrite in natural, professional, and approachable language suitable for a product catalog or online store.\nTone should be factual and clear — describe what the product is and what it does, without marketing fluff or vague quality claims.\nDescribe the product through its use and properties, not through subjective praise.\n\n- Constraints:\nDo not invent technical data (weight, EAN, certifications) that is not clearly visible in the photos or product name. If data is unavailable, write exactly: no information available.\nDo not describe packaging as a product feature.\nDo not address the buyer directly.\n\n- REQUIRED OUTPUT STRUCTURE:\n- Product name: full name including size or weight if visible\n- Brand: manufacturer name\n- Short description: 3 sentences — what the product is and its form, its key properties, and its main use case\n- Features & benefits: 2–4 lines, each in format: feature – benefit for the buyer\n- EAN barcode: if visible in the photo\n\n- OUTPUT FORMAT (MANDATORY)\n\nDo not use headers or labels.\nList each feature-benefit pair on a separate line using the format: feature – benefit.\nDo not use bullet points, numbers, or icons.\nUse \"–\" only to connect feature with benefit.\nOutput must be ready to paste directly into a product system.\n\nReturn exactly 5 lines, each in KEY=VALUE format. No other lines.\nIf data is unavailable, write exactly: no information available\n\nPRODUCT_NAME=\nBRAND=\nSHORT_DESCRIPTION=\nFEATURES_BENEFITS=line1|line2|line3|line4\nEAN=\n",
+        "inputType": "base64",
+        "binaryPropertyName": "={{ Object.keys($binary).filter(k => k.startsWith('image')).join(',') }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [896, 0],
+      "id": "4ea62d14-b159-4f76-a15d-2aca4d8baf6d",
+      "name": "Analyze with GPT-4.1",
+      "credentials": {
+        "openAiApi": {
+          "id": "TWOJE_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $json;\n\nlet text =\n  root?.[0]?.content?.find(c => c.type === 'output_text')?.text\n  || root?.[0]?.content?.[0]?.text\n  || root?.[0]?.[0]?.content?.find(c => c.type === 'output_text')?.text\n  || root?.[0]?.[0]?.content?.[0]?.text\n  || '';\n\nif (!text) {\n  return [{ json: { error: 'No text field found in response', raw: root } }];\n}\n\nconst lines = text.split(/\\r?\\n/).map(l => l.trim()).filter(Boolean);\n\nconst data = {};\nfor (const line of lines) {\n  const eq = line.indexOf('=');\n  if (eq === -1) continue;\n  const key = line.slice(0, eq).trim();\n  const value = line.slice(eq + 1).trim();\n  data[key] = value;\n}\n\nconst featuresBenefits = (data.FEATURES_BENEFITS || '')\n  .split('|')\n  .map(s => s.trim())\n  .filter(Boolean)\n  .join('\\n');\n\nreturn [{\n  json: {\n    nazwa_produktu: data.PRODUCT_NAME || '',\n    firma: data.BRAND || '',\n    krotki_opis: data.SHORT_DESCRIPTION || '',\n    cechy_korzysci: featuresBenefits,\n    kod_ean: data.EAN || '',\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 0],
+      "id": "41389417-5579-4436-a488-5004e2d7c4f8",
+      "name": "Parse GPT response"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "TWOJE_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Opisy produktów",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/TWOJE_SPREADSHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Arkusz1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/TWOJE_SPREADSHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Nazwa produktu": "={{ $json.nazwa_produktu }}",
+            "firma": "={{ $json.firma }}",
+            "cecha korzyść": "={{ $json.cechy_korzysci }}",
+            "krótki opis": "={{ $json.krotki_opis }}",
+            "EAN": "={{ $json.kod_ean }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Nazwa produktu", "displayName": "Nazwa produktu", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "firma", "displayName": "firma", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "cecha korzyść", "displayName": "cecha korzyść", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "krótki opis", "displayName": "krótki opis", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "EAN", "displayName": "EAN", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [1344, 0],
+      "id": "95e1d62e-fd6c-4f43-bd2b-07b2669e2277",
+      "name": "Append to Google Sheets",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TWOJE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "New product folder added": { "main": [[{ "node": "Search product images", "type": "main", "index": 0 }]] },
+    "Search product images": { "main": [[{ "node": "Download images", "type": "main", "index": 0 }]] },
+    "Download images": { "main": [[{ "node": "Aggregate images", "type": "main", "index": 0 }]] },
+    "Aggregate images": { "main": [[{ "node": "Analyze with GPT-4.1", "type": "main", "index": 0 }]] },
+    "Analyze with GPT-4.1": { "main": [[{ "node": "Parse GPT response", "type": "main", "index": 0 }]] },
+    "Parse GPT response": { "main": [[{ "node": "Append to Google Sheets", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
